@@ -79,7 +79,7 @@ python agentmsg.py reply <message-id> "完成；测试结果见附件"
 python agentmsg.py wait controller --after-id <sent-message-id> --timeout 600
 ```
 
-`watch` 沿用原消息的原子认领、两分钟 Claim Lease、fencing 与失败回退。Herdr 路径通过 `agent get` 读取生命周期状态，只有 `idle/done` 时才调用一次 `agent prompt` 提交**固定通知**（消息编号与短预览，正文由 Agent 自己 `agentmsg read` 获取）。
+`watch` 沿用原消息的原子认领、两分钟 Claim Lease、fencing 与失败回退。Herdr 路径通过 `agent get` 读取生命周期状态，只有 `idle/done` 时才调用一次 `agent prompt` 提交**固定通知**（消息编号与短预览，正文由 Agent 自己 `python agentmsg.py read` 获取）。
 
 watcher 应在 `HERDR_ENV=1` 的受管 Pane 中启动；实际 Windows PowerShell 运行时应确认当前 Pane 继承该变量。自动 watch 可在独立受管 Pane 执行：
 

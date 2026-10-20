@@ -9,7 +9,7 @@
   - 消息短文本放 body，长内容用 --file 存附件
   - status_log 只保留近 30 天，任何命令都会顺手清理
 """
-import argparse, json, os, secrets, shutil, sqlite3, subprocess, sys, time, uuid
+import argparse, json, os, secrets, shutil, sqlite3, subprocess, sys, tempfile, time, uuid
 from pathlib import Path
 
 STALE_MINUTES = 15  # ponytail: 状态租约固定 15 分钟；要可调再加 --stale
@@ -76,7 +76,8 @@ CREATE INDEX IF NOT EXISTS idx_status_agent ON status_log(agent, created_at);
 def db_path(args):
     return Path(args.db)
 
-def connect(args):
+def connect(args, register=True):
+    """打开数据库连接。register=False 用于测试自管生命周期的连接，不进统一关闭登记。"""
     p = db_path(args)
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(p, timeout=10)
@@ -104,7 +105,25 @@ def connect(args):
         conn.execute("ALTER TABLE messages ADD COLUMN claim_token TEXT")
     prune(conn, p)  # 懒清理，不设 cron
     recover_claims(conn)  # 崩溃滞留的认领过期回收（任何命令顺手做）
+    if register:
+        _open_conns.append(conn)
     return conn
+
+_open_conns = []  # 弱需求：命令进程短命，退出前统一关，不依赖 GC 时机
+
+def close_open_conns():
+    """关闭 connect() 登记的所有连接。
+
+    cmd_* 的连接要么是丢弃的返回值要么是局部变量，被 cursor 等循环引用挂着，
+    引用计数不清、只能等分代 GC；Windows 下 GC 前删 .agent-mail/ 会撞 WinError 32
+    （selfcheck 临时目录残留、测试 tearDown 报错都是它）。入口和测试收尾调用。
+    cmd_watch 的长连接注册后同样由本函数关（watch 结束即进程退出，无害）。
+    """
+    while _open_conns:
+        try:
+            _open_conns.pop().close()
+        except Exception:
+            pass
 
 def recover_claims(conn):
     """A：认领超租约（watcher 崩在 paste 前）→ 回到 pending 重投。"""
@@ -230,7 +249,7 @@ def notify_text(row):
     """B：只注入固定格式通知（id+来源+预览+取信指引），正文绝不进 pane。"""
     prev = (row["subject"] or row["body"] or "").replace("\n", " ")[:100]
     return (f"[agentmsg] 新消息 msg {row['id']} 来自 {row['sender']}（{row['kind']}）：{prev}\n"
-            f"取信: agentmsg read {row['id']}")
+            f"取信: python agentmsg.py read {row['id']}")
 
 def claim_one(conn, name):
     """A：pending →(原子认领)→ claimed+租约+token。返回 None=没消息 / True=被抢 / dict=认领成功。"""
@@ -497,6 +516,43 @@ def cmd_log(a):
         rows = [r for r in rows if r["agent"] == a.agent]
     out(rows, ("agent", "state", "detail", "created_at"), a.json)
 
+def cmd_selfcheck(a):
+    """自检：在临时目录跑一遍完整命令链（不含 wait/watch），全部通过打印 selfcheck: OK。"""
+    steps = [
+        ("init",        ["init"]),
+        ("register",    ["register", "alice"]),
+        ("register",    ["register", "bob"]),
+        ("send",        ["send", "bob", "alice", "hello", "--subject", "hi"]),
+        ("inbox",       ["inbox", "alice"]),
+        ("read",        ["read", "1"]),
+        ("reply",       ["reply", "1", "got it"]),
+        ("done",        ["done", "1"]),
+        ("task new",    ["task", "new", "demo task", "--assign", "bob"]),
+        ("task list",   ["task", "list"]),
+        ("status",      ["status", "bob", "working", "selfcheck"]),
+        ("log",         ["log"]),
+        ("sweep",       ["sweep"]),
+    ]
+    tmp = Path(tempfile.mkdtemp(prefix="agentmsg-selfcheck-"))
+    try:
+        for name, argv in steps:
+            try:
+                ns = build().parse_args(["--db", str(tmp / ".agent-mail" / "mail.db"), *argv])
+                try:
+                    ns.fn(ns)
+                finally:
+                    close_open_conns()  # 不关的话 Windows 下 rmtree 撞 WinError 32，目录成残留
+            except SystemExit as e:
+                if e.code:
+                    raise
+            except Exception as e:
+                print(f"selfcheck: FAIL at {name}: {e}", file=sys.stderr)
+                sys.exit(1)
+            print(f"ok: {name}")
+        print("selfcheck: OK")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 def build():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--db", default=str(Path.cwd() / ".agent-mail" / "mail.db"))
@@ -518,6 +574,7 @@ def build():
     q = s.add_parser("done"); q.add_argument("id", type=int); q.set_defaults(fn=cmd_done)
     q = s.add_parser("status"); q.add_argument("agent"); q.add_argument("state"); q.add_argument("detail", nargs="?"); q.set_defaults(fn=cmd_status)
     q = s.add_parser("log"); q.add_argument("agent", nargs="?"); q.add_argument("--days", type=int, default=30); q.add_argument("--json", action="store_true"); q.set_defaults(fn=cmd_log)
+    s.add_parser("selfcheck").set_defaults(fn=cmd_selfcheck)
     s.add_parser("sweep").set_defaults(fn=cmd_sweep)
     t = s.add_parser("task"); tt = t.add_subparsers(dest="tcmd", required=True)
     q = tt.add_parser("new"); q.add_argument("title"); q.add_argument("--assign"); q.set_defaults(fn=cmd_task_new)
@@ -529,4 +586,7 @@ def build():
 
 if __name__ == "__main__":
     args = build().parse_args()
-    args.fn(args)
+    try:
+        args.fn(args)
+    finally:
+        close_open_conns()  # Windows：GC 前不关连接，.agent-mail/ 清理会撞 WinError 32

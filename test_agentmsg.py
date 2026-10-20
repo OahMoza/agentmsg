@@ -73,6 +73,8 @@ class Base(unittest.TestCase):
         except SystemExit as e:
             if e.code:  # 非 0 退出是真错误，向上抛；0（done/task set 成功路径）吞掉
                 raise
+        finally:
+            am.close_open_conns()  # Windows：命令函数的连接不关会锁住临时目录
         return out.getvalue(), err.getvalue()
 
     def sql(self, q, p=()):
@@ -166,7 +168,7 @@ class TestClaimRecovery(Base):
                   "claim_token='newtok' WHERE id=1")
         c.commit()
         c.close()
-        conn = am.connect(self.ns("inbox", "tester", "--all"))
+        conn = am.connect(self.ns("inbox", "tester", "--all"), register=False)
         self.assertFalse(am.finalize(conn, 1, "oldtok"))  # 旧持有者的 fence 失效
         self.assertEqual(self.sql("SELECT status,claim_token FROM messages WHERE id=1")[0]["status"], "claimed")
         self.assertTrue(am.finalize(conn, 1, "newtok"))
@@ -186,7 +188,7 @@ class TestConcurrentClaim(Base):
 
         def worker():
             ns = self.ns("watch", "tester", "--once")
-            conn = am.connect(ns)
+            conn = am.connect(ns, register=False)
             start.wait()
             while am.deliver_one(conn, "tester") in ("delivered", "busy"):
                 pass
@@ -225,7 +227,7 @@ class TestTernSafety(Base):
             self.call("watch", "tester", "--once")
         paste = [c for c in fake.sends() if c[3] == "paste"][0]
         self.assertNotIn("ENDMARK-9x8y", paste[4])  # 预览(≤100字符)之外的正文绝不进 pane
-        self.assertIn("agentmsg read 1", paste[4])  # 固定通知 + 取信指引
+        self.assertIn("python agentmsg.py read 1", paste[4])  # 固定通知 + 取信指引
         self.assertIn("msg 1", paste[4])
 
     def test_approval_dialog_skips_delivery(self):
@@ -352,7 +354,7 @@ class TestActivity(Base):
         self.send("dev", "tester", "任务1")
         self.send("dev", "tester", "任务2")
         fake = FakeTern()
-        conn = am.connect(self.ns("inbox", "tester", "--all"))
+        conn = am.connect(self.ns("inbox", "tester", "--all"), register=False)
         with mock.patch.object(am.subprocess, "run", fake):
             self.assertEqual(am.deliver_one(conn, "tester"), "delivered")
             self.reg("tester", block=222)  # 中途重绑
@@ -403,8 +405,11 @@ class TestWaitBarrier(Base):
 
     def call2(self, ns):
         out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            ns.fn(ns)
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                ns.fn(ns)
+        finally:
+            am.close_open_conns()
         return out.getvalue(), err.getvalue()
 
 
@@ -493,7 +498,7 @@ class TestSqliteHardening(Base):
             mode = c.execute("PRAGMA journal_mode").fetchone()[0]
             self.assertEqual(mode.lower(), "wal")
             c.close()
-        conn = am.connect(self.ns("agents"))
+        conn = am.connect(self.ns("agents"), register=False)
         self.assertEqual(conn.execute("PRAGMA busy_timeout").fetchone()[0], 5000)
         conn.close()
 

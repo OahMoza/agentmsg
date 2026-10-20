@@ -36,22 +36,29 @@ class TestHerdrTransport(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.db = str(Path(self.temp.name) / "mail.db")
     def tearDown(self):
-        self.temp.cleanup()
+        # ponytail: 双保险——close_open_conns 应已收干净；万一有漏网连接删不掉就留给系统临时目录
+        try:
+            self.temp.cleanup()
+        except PermissionError:
+            pass
     def call(self, *args):
         parsed = am.build().parse_args(["--db", self.db, *[str(i) for i in args]])
-        with redirect_stdout(io.StringIO()):
-            parsed.fn(parsed)
+        try:
+            with redirect_stdout(io.StringIO()):
+                parsed.fn(parsed)
+        finally:
+            am.close_open_conns()
     def test_status_parser(self):
         self.assertEqual(ah.agent_status('{"result":{"agent":{"agent_status":"idle"}}}'), "idle")
         self.assertIsNone(ah.agent_status('{"result":{}}'))
     def test_register_and_switch(self):
         self.call("register", "tester", "--kind", "omp", "--herdr-target", "tester")
-        c = am.connect(am.build().parse_args(["--db", self.db, "agents"]))
+        c = am.connect(am.build().parse_args(["--db", self.db, "agents"]), register=False)
         r = c.execute("select transport,herdr_target,tern_block_id from agents where name='tester'").fetchone()
         self.assertEqual((r["transport"], r["herdr_target"], r["tern_block_id"]), ("herdr", "tester", None))
         c.close()
         self.call("register", "tester", "--block", 111)
-        c = am.connect(am.build().parse_args(["--db", self.db, "agents"]))
+        c = am.connect(am.build().parse_args(["--db", self.db, "agents"]), register=False)
         r = c.execute("select transport,herdr_target,tern_block_id from agents where name='tester'").fetchone()
         self.assertEqual((r["transport"], r["herdr_target"], r["tern_block_id"]), ("tern", None, 111))
         c.close()
@@ -59,12 +66,12 @@ class TestHerdrTransport(unittest.TestCase):
         self.call("register", "tester", "--kind", "omp", "--herdr-target", "tester")
         self.call("send", "dev", "tester", "敏感内容" * 100)
         cli = MockHerdr()
-        c = am.connect(am.build().parse_args(["--db", self.db, "agents"]))
+        c = am.connect(am.build().parse_args(["--db", self.db, "agents"]), register=False)
         with mock.patch.object(ah.subprocess, "run", cli), mock.patch.dict(os.environ, {"HERDR_ENV":"1"}):
             self.assertEqual(am.deliver_one(c, "tester"), "delivered")
         calls = [x for x in cli.calls if x[1:3] == ["agent", "prompt"]]
         self.assertEqual(len(calls), 1)
-        self.assertIn("agentmsg read 1", calls[0][4])
+        self.assertIn("python agentmsg.py read 1", calls[0][4])
         self.assertNotIn("敏感内容" * 100, calls[0][4])
         self.assertEqual(c.execute("select status from messages").fetchone()["status"], "delivered")
         c.close()
@@ -74,7 +81,7 @@ class TestHerdrTransport(unittest.TestCase):
                 self.call("register", "tester", "--herdr-target", "tester")
                 self.call("send", "dev", "tester", f"hello {status}")
                 cli=MockHerdr(status)
-                c = am.connect(am.build().parse_args(["--db", self.db, "agents"]))
+                c = am.connect(am.build().parse_args(["--db", self.db, "agents"]), register=False)
                 with mock.patch.object(ah.subprocess,"run",cli), mock.patch.dict(os.environ,{"HERDR_ENV":"1"}):
                     self.assertEqual(am.deliver_one(c,"tester"),"skipped")
                 self.assertFalse(any(x[1:3] == ["agent","prompt"] for x in cli.calls))
@@ -83,7 +90,7 @@ class TestHerdrTransport(unittest.TestCase):
         self.call("register","tester","--herdr-target","tester")
         self.call("send","dev","tester","hello")
         cli=MockHerdr(fail_prompt=True)
-        c=am.connect(am.build().parse_args(["--db",self.db,"agents"]))
+        c=am.connect(am.build().parse_args(["--db",self.db,"agents"]), register=False)
         with mock.patch.object(ah.subprocess,"run",cli), mock.patch.dict(os.environ,{"HERDR_ENV":"1"}):
             self.assertEqual(am.deliver_one(c,"tester"),"failed")
         self.assertEqual(c.execute("select status from messages").fetchone()["status"],"pending")
