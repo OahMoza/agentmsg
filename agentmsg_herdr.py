@@ -13,7 +13,10 @@ READY = {"idle", "done"}
 
 def agent_status(payload):
     """仅从结构化 Herdr Agent 返回值读取状态；不凭终端文字猜测。未知则拒绝投递。"""
-    data = json.loads(payload)
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return None
     result = data.get("result", {}) if isinstance(data, dict) else {}
     if not isinstance(result, dict):
         return None
@@ -21,7 +24,9 @@ def agent_status(payload):
     if not isinstance(agent, dict):
         return None
     status = agent.get("agent_status", agent.get("status", agent.get("state")))
-    return status if isinstance(status, str) else None
+    return status if isinstance(status, str) and status in (
+        "idle", "working", "blocked", "done", "unknown"
+    ) else None
 
 
 def submit_notification(target, message):

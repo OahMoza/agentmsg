@@ -80,7 +80,7 @@ tern run <新block-id> "python agentmsg.py register <名字> --kind claude --blo
 - **已存在的活 pane 也能接入**，不必 split 新开：`agentmsg register <名字> --kind omp --block <现存id>`（注册仍由编排方做，别让 agent 自探测）。
 - `reply` 正文是**位置参数**：`agentmsg reply <id> "正文"`，没有 `--body`；长产物用 `--file`。
 
-任务正文里**永远不要写死 msg id**（发送时 id 还没定）；agent 按通知里的 id 自己取信（`agentmsg read <通知里的id>`）。
+任务正文里**永远不要写死 msg id**（发送时 id 还没定）；agent 按通知里的 id 自己取信（`python agentmsg.py read <通知里的id>`）。通知只包含消息 ID 和固定取信指引，不注入原消息正文。
 
 对 capture 不可见的 agent（如 omp）：**结果回收走信箱，不走 capture**——任务里要求它 `agentmsg reply <id> --file 产物路径`，完成后 `agentmsg wait/inbox` 收取；屏幕观察降级为 `tern process`（活没活）+ `tern wait --until idle`（干完没）。
 

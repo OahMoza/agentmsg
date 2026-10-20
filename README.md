@@ -85,3 +85,11 @@ python agentmsg.py inbox controller --all
 Herdr 路径只向 `idle/done` Agent 投递固定消息通知（`herdr agent get` + `herdr agent prompt`）；`working/blocked/unknown` 不投递。Herdr 成功返回意味着输入已被提交，**不是 Agent 已读取/完成**。可由 Agent `agentmsg read <id>` 后 `agentmsg reply <id> ...`，用 `wait` 按消息 ID/thread 栅栏收回执。未做真实 Herdr/Windows 端到端验证前，请先按 Skill 说明运行隔离冒烟测试。
 
 旧 `register --block <int>` 和 Tern watcher 默认行为保持兼容；用 `--herdr-target <agent-name-or-pane-id>` 给同一收件人切换至 Herdr，随时再用 `--block` 切回。
+
+## 消息已读与通知安全（2026-10-20）
+
+- `read` 会将 `pending` 或 `delivered` 更新为 `read`，保留首次 `read_at`；`claimed` 仍受 watcher 认领保护。
+- Tern 和 Herdr 共用的终端通知现在**只含可信消息 ID 与固定取信指引**，不再插入消息正文、主题、发件人或内容预览。
+- `delivered` 只代表投递动作被终端接受，不代表已读；`read` 不代表任务完成，`done` 不代表 ANWG 的 WorkUnit.ACCEPTED。
+- Herdr 的 `agent get` 返回 JSON 无效或状态未知时 fail-closed。若提交超时仍可能已投递，收件方必须以消息 ID 去重，不能重复执行正式任务。
+- 如 Agent 当前工作目录不是仓库根目录，须确保可以执行 `python agentmsg.py read <id>`，且各 Agent 使用相同的 `.agent-mail/mail.db`；后续可增加显式脚本路径与 DB 路径传递。

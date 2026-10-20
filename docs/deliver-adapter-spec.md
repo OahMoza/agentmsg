@@ -45,7 +45,7 @@ def deliver_one_<tool>(conn, name, target):
 | `claim_one(conn, name)` | 原子认领一条 pending（BEGIN IMMEDIATE + 条件 UPDATE + claim_token） | 返回 `None`→empty、`True`→busy、dict→已认领 |
 | `finalize(conn, mid, token)` | fencing：token 仍持租约才落 delivered | 提交成功后必须调用 |
 | `revert(conn, mid, token)` | 退回 pending（失败/不安全/跳过时） | 任何"没投出去"的路径必须调用 |
-| `notify_text(row)` | 固定格式通知文本：`[agentmsg] 新消息 msg <id> 来自 <sender>（<kind>）：<预览>\n取信: python agentmsg.py read <id>` | **只投这个**，消息正文绝不进终端 |
+| `notify_text(row)` | 固定格式通知文本：`[agentmsg] 新消息 msg <id>。\n取信: python agentmsg.py read <id>` | **只投这个**，不拼接 sender、subject、kind 或正文等不可信字段 |
 
 适配器的 try 块只包含"查状态 + 提交"两步，其余全交给分发层语义。
 

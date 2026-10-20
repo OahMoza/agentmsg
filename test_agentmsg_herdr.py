@@ -51,6 +51,10 @@ class TestHerdrTransport(unittest.TestCase):
     def test_status_parser(self):
         self.assertEqual(ah.agent_status('{"result":{"agent":{"agent_status":"idle"}}}'), "idle")
         self.assertIsNone(ah.agent_status('{"result":{}}'))
+        self.assertIsNone(ah.agent_status('malformed JSON'))
+        self.assertIsNone(ah.agent_status('{"result":{"agent":{"status":"success"}}}'))
+        self.assertEqual(ah.agent_status('{"result":{"agent":{"status":"done"}}}'), "done")
+        self.assertEqual(ah.agent_status('{"result":{"agent_status":"idle"}}'), "idle")
     def test_register_and_switch(self):
         self.call("register", "tester", "--kind", "omp", "--herdr-target", "tester")
         c = am.connect(am.build().parse_args(["--db", self.db, "agents"]), register=False)
@@ -72,7 +76,7 @@ class TestHerdrTransport(unittest.TestCase):
         calls = [x for x in cli.calls if x[1:3] == ["agent", "prompt"]]
         self.assertEqual(len(calls), 1)
         self.assertIn("python agentmsg.py read 1", calls[0][4])
-        self.assertNotIn("敏感内容" * 100, calls[0][4])
+        self.assertNotIn("敏感内容", calls[0][4])
         self.assertEqual(c.execute("select status from messages").fetchone()["status"], "delivered")
         c.close()
     def test_busy_blocked_unknown_skip(self):

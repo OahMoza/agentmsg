@@ -246,10 +246,9 @@ def capture(block):
     return _tern(block).stdout
 
 def notify_text(row):
-    """B：只注入固定格式通知（id+来源+预览+取信指引），正文绝不进 pane。"""
-    prev = (row["subject"] or row["body"] or "").replace("\n", " ")[:100]
-    return (f"[agentmsg] 新消息 msg {row['id']} 来自 {row['sender']}（{row['kind']}）：{prev}\n"
-            f"取信: python agentmsg.py read {row['id']}")
+    """只注入可信消息 ID 和固定取信指引，不拼接任何用户可控元数据或正文。"""
+    mid = int(row["id"])
+    return f"[agentmsg] 新消息 msg {mid}。\n取信: python agentmsg.py read {mid}"
 
 def claim_one(conn, name):
     """A：pending →(原子认领)→ claimed+租约+token。返回 None=没消息 / True=被抢 / dict=认领成功。"""
@@ -468,8 +467,12 @@ def cmd_read(a):
     r = conn.execute("SELECT * FROM messages WHERE id=?", (a.id,)).fetchone()
     if not r:
         die(f"消息不存在: {a.id}")
-    conn.execute("UPDATE messages SET status='read', read_at=datetime('now') WHERE id=? AND status='pending'", (a.id,))
+    conn.execute(
+        "UPDATE messages SET status='read', read_at=COALESCE(read_at,datetime('now')) "
+        "WHERE id=? AND status IN ('pending','delivered')", (a.id,))
     conn.commit()
+    # 输出当前真实状态：从 delivered 读取后应看到 read，而不是旧快照。
+    r = conn.execute("SELECT * FROM messages WHERE id=?", (a.id,)).fetchone()
     if a.json:
         print(json.dumps(dict(r), ensure_ascii=False, indent=2))
         return
