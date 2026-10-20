@@ -65,3 +65,23 @@ npx skills add OahMoza/agentmsg -g -y  # 装到用户级，免确认
 ## 设计文档
 
 见 [agentmsg-方案.md](agentmsg-方案.md)。
+
+## Herdr 适配（可与 Tern 共存）
+
+`skills/herdr/SKILL.md` 是面向 **Herdr 0.9.4** 的 agentmsg 扩展 Skill；对应的 transport 在 `agentmsg_herdr.py`。消息 DB/Claim/Thread/Wait 仍由 `agentmsg.py` 统一维护，不重建队列。
+
+在 **Herdr 托管的 Agent Pane**（`HERDR_ENV=1`）内操作：
+
+```bash
+herdr agent list
+python agentmsg.py init
+python agentmsg.py register controller --kind agent
+python agentmsg.py register tester --kind omp --herdr-target tester
+python agentmsg.py send controller tester "请检查并回复"
+python agentmsg.py watch tester --once
+python agentmsg.py inbox controller --all
+```
+
+Herdr 路径只向 `idle/done` Agent 投递固定消息通知（`herdr agent get` + `herdr agent prompt`）；`working/blocked/unknown` 不投递。Herdr 成功返回意味着输入已被提交，**不是 Agent 已读取/完成**。可由 Agent `agentmsg read <id>` 后 `agentmsg reply <id> ...`，用 `wait` 按消息 ID/thread 栅栏收回执。未做真实 Herdr/Windows 端到端验证前，请先按 Skill 说明运行隔离冒烟测试。
+
+旧 `register --block <int>` 和 Tern watcher 默认行为保持兼容；用 `--herdr-target <agent-name-or-pane-id>` 给同一收件人切换至 Herdr，随时再用 `--block` 切回。

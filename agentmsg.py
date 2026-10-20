@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS agents(
   name TEXT UNIQUE NOT NULL,
   kind TEXT,
   tern_block_id INTEGER,
+  herdr_target TEXT,
+  transport TEXT NOT NULL DEFAULT 'tern',
   state TEXT,
   state_updated_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -89,6 +91,10 @@ def connect(args):
         conn.execute("ALTER TABLE agents ADD COLUMN state TEXT")
     if "state_updated_at" not in cols:
         conn.execute("ALTER TABLE agents ADD COLUMN state_updated_at TEXT")
+    if "herdr_target" not in cols:
+        conn.execute("ALTER TABLE agents ADD COLUMN herdr_target TEXT")
+    if "transport" not in cols:
+        conn.execute("ALTER TABLE agents ADD COLUMN transport TEXT NOT NULL DEFAULT 'tern'")
     mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
     if "delivered_at" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN delivered_at TEXT")
@@ -167,10 +173,10 @@ def cmd_wait(a):
 def cmd_agents(a):
     conn = connect(a)
     rows = conn.execute(
-        "SELECT name,kind,tern_block_id,state,state_updated_at,"
+        "SELECT name,kind,transport,tern_block_id,herdr_target,state,state_updated_at,"
         "(state_updated_at < datetime('now',?)) AS stale "
         "FROM agents ORDER BY name", (f"-{STALE_MINUTES} minutes",)).fetchall()
-    out(rows, ("name", "kind", "tern_block_id", "state", "state_updated_at", "stale"), a.json)
+    out(rows, ("name", "kind", "transport", "tern_block_id", "herdr_target", "state", "state_updated_at", "stale"), a.json)
 
 def cmd_sweep(a):
     conn = connect(a)
@@ -261,7 +267,9 @@ def revert(conn, mid, token):
 def deliver_one(conn, name):
     """投一封。返回 'empty'|'unbound'|'busy'|'skipped'|'failed'|'delivered'。
     每次调用都重读绑定（C：重绑/换 pane 立即生效，旧 watcher 不再打旧 pane）。"""
-    ag = conn.execute("SELECT name,tern_block_id FROM agents WHERE name=?", (name,)).fetchone()
+    ag = conn.execute("SELECT name,transport,tern_block_id,herdr_target FROM agents WHERE name=?", (name,)).fetchone()
+    if ag and ag["transport"] == "herdr":
+        return deliver_one_herdr(conn, name, ag["herdr_target"])
     if not ag or not ag["tern_block_id"]:
         return "unbound"
     got = claim_one(conn, name)
@@ -295,6 +303,34 @@ def deliver_one(conn, name):
         print(f"warn: msg {row['id']} 投递失败已退回队列: {e}", file=sys.stderr)
         return "failed"
 
+
+def deliver_one_herdr(conn, name, target):
+    """Herdr 投递：沿用相同的消息认领、租约、fencing 和回退机制。
+    Herdr agent.prompt 提交输入；delivered 仅意味着 Herdr 接受提交，不代表 Agent 已处理。
+    """
+    if not target:
+        return "unbound"
+    got = claim_one(conn, name)
+    if got is None:
+        return "empty"
+    if got is True:
+        return "busy"
+    row = got
+    try:
+        from agentmsg_herdr import submit_notification
+        if not submit_notification(target, notify_text(row)):
+            revert(conn, row["id"], row["claim_token"])
+            print(f"skip: msg {row['id']} 暂缓——Herdr Agent 非 idle/done，保持 pending", file=sys.stderr)
+            return "skipped"
+        if finalize(conn, row["id"], row["claim_token"]):
+            print(f"delivered: msg {row['id']} → {name} (herdr target={target})")
+            return "delivered"
+        return "busy"
+    except Exception as e:
+        revert(conn, row["id"], row["claim_token"])
+        print(f"warn: msg {row['id']} Herdr 投递失败或结果不明，已退回队列: {e}", file=sys.stderr)
+        return "failed"
+
 def acquire_lock(lockfile):
     """B：watcher 单例保险（同 pane 并发 paste 会交叠）。O_EXCL 建锁 + pid；
     残留锁（超 WATCH_LOCK_MINUTES）可接管。"""
@@ -320,7 +356,7 @@ def cmd_watch(a):
         while True:
             st = deliver_one(conn, a.name)
             if st == "unbound":
-                print(f"warn: {a.name} 未绑定 tern block id（register --block），暂不投递", file=sys.stderr)
+                print(f"warn: {a.name} 未绑定有效 Tern block 或 Herdr target，暂不投递", file=sys.stderr)
             if st == "delivered" or (once and st == "busy"):
                 continue
             if once:
@@ -338,19 +374,41 @@ def cmd_init(a):
     connect(a)
     print(f"ok: {db_path(a)}（WAL 已启用，.agent-mail/ 记得加 .gitignore）")
 
+
 def cmd_register(a):
     conn = connect(a)
+    if a.block is not None and a.herdr_target is not None:
+        die("不可同时指定 --block (Tern) 和 --herdr-target (Herdr)")
+    old = conn.execute(
+        "SELECT kind,tern_block_id,herdr_target,transport,state FROM agents WHERE name=?",
+        (a.name,)).fetchone()
+    if a.herdr_target is not None:
+        transport, block, target = "herdr", None, a.herdr_target
+    elif a.block is not None:
+        transport, block, target = "tern", a.block, None
+    elif old:
+        transport, block, target = old["transport"], old["tern_block_id"], old["herdr_target"]
+    else:
+        transport, block, target = "tern", None, None
+
+    changed = not old or (
+        transport, block, target
+    ) != (old["transport"], old["tern_block_id"], old["herdr_target"])
+    state = "idle" if changed else old["state"] or "idle"
     conn.execute("BEGIN IMMEDIATE")
     conn.execute(
-        "INSERT INTO agents(name,kind,tern_block_id,state,state_updated_at) VALUES(?,?,?,'idle',datetime('now')) "
-        "ON CONFLICT(name) DO UPDATE SET kind=COALESCE(excluded.kind,kind), "
-        "tern_block_id=COALESCE(excluded.tern_block_id,tern_block_id), "
-        "state=CASE WHEN excluded.tern_block_id IS NOT NULL "
-        "AND excluded.tern_block_id!=agents.tern_block_id THEN 'idle' ELSE agents.state END, "
+        "INSERT INTO agents(name,kind,tern_block_id,herdr_target,transport,state,state_updated_at) "
+        "VALUES(?,?,?,?,?,?,datetime('now')) "
+        "ON CONFLICT(name) DO UPDATE SET "
+        "kind=COALESCE(excluded.kind,agents.kind),"
+        "tern_block_id=excluded.tern_block_id,"
+        "herdr_target=excluded.herdr_target,"
+        "transport=excluded.transport,"
+        "state=excluded.state,"
         "state_updated_at=datetime('now')",
-        (a.name, a.kind, a.block))
+        (a.name, a.kind, block, target, transport, state))
     conn.commit()
-    print(f"ok: {a.name} (kind={a.kind} block={a.block})")
+    print(f"ok: {a.name} (kind={a.kind} transport={transport} target={target if transport == 'herdr' else block})")
 
 def cmd_send(a):
     conn = connect(a)
@@ -449,7 +507,9 @@ def build():
     q.add_argument("--after-id", type=int, default=0, dest="after_id"); q.add_argument("--kind")
     q.add_argument("--thread", action="append", help="只等这些 thread 的回信（可重复，防跨任务串信）")
     q.add_argument("--timeout", type=int, default=600); q.add_argument("--json", action="store_true"); q.set_defaults(fn=cmd_wait)
-    q = s.add_parser("register"); q.add_argument("name"); q.add_argument("--kind"); q.add_argument("--block", type=int); q.set_defaults(fn=cmd_register)
+    q = s.add_parser("register"); q.add_argument("name"); q.add_argument("--kind"); q.add_argument("--block", type=int)
+    q.add_argument("--herdr-target", help="Herdr 中唯一的 Agent 名称或当前 pane ID；切换绑定时清除 Tern block")
+    q.set_defaults(fn=cmd_register)
     q = s.add_parser("send"); q.add_argument("sender"); q.add_argument("to"); q.add_argument("body", nargs="?")
     q.add_argument("--kind", default="note"); q.add_argument("--thread"); q.add_argument("--subject"); q.add_argument("--file"); q.set_defaults(fn=cmd_send)
     q = s.add_parser("inbox"); q.add_argument("agent"); q.add_argument("--all", action="store_true"); q.add_argument("--json", action="store_true"); q.set_defaults(fn=cmd_inbox)
