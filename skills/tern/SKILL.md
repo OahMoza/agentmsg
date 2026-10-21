@@ -88,6 +88,9 @@ tern run <新block-id> "python agentmsg.py register <名字> --kind claude --blo
 
 **单向通知（UDP 语义）**：`send` 本身就是数据报——不需要反馈就别建回执层。`agentmsg send <我> <对方> "…" --kind notify` 发完即走：不 `wait`、不查回执，通知话术写明"读完即可，无需回复"。接收方 `read` 后不回信，可 `done <id>` 清 pending（唯一的可选 ACK）。广播 = 循环多次 `send`。协议语义详见方案 §5.4。
 
+**派活话术（四要素，无脚本名；方案 §5.6）**：①做什么 ②完成后怎么交（回信到本消息 / 标记 done / 直发第三方） ③**谁消费后续回信** ④水位线与线程约定——全用自然语言写进信箱正文；`python agentmsg.py`、CLI、block id 一律不进话术，动词映射（回信→reply、查收→read、转交→tern send）由 agent 凭 skill 语境完成。pane 通知固定一行：`有新消息：#<id>，请查收信箱，按信里说的做`。
+**注册名用岗位代号**（角色即标签，方案 §3）：`dev-1`、`qa-1`…；`name` 记岗位，`kind` 记程序，pane 位置与 harness 查 `agents` 注册表。
+
 **结果回收走信箱，不走 capture**（即使 TUI 形态下 capture 可见——信箱是几行结构化记录，capture 是整帧推理文本，进的是编排方上下文）：任务里要求它 `agentmsg reply <id> --file 产物路径`，完成后 `agentmsg wait/inbox` 收取；capture 降级为按需排障工具（见「读输出」的 capture 使用纪律）。
 
 ### omp 投递限制（实测，勿踩）
@@ -119,8 +122,8 @@ tern capture <id>                                  # 安检：idle ❯ 可投；
 tern wait <id> --until idle=3000 --timeout 120 || true
 python agentmsg.py agents                          # 确认对方已注册；顺带看自己的发件人名在不在
 python agentmsg.py register <我的名字> --kind agent  # 不在就注册，否则对方 reply 被拒
-python agentmsg.py send <我的名字> <对方agent名> "任务正文，勿写死 msg id"
-tern send <id> paste "有新消息：agentmsg read <通知里的id>，完成后 agentmsg reply <id> \"回复正文\""
+python agentmsg.py send <我的名字> <对方agent名> "任务：<做什么>。完成后回信到本消息。<四要素其余部分>"
+tern send <id> paste "有新消息：#<通知里的id>，请查收信箱，按信里说的做"
 tern send <id> keys enter
 tern wait <id> --until idle=3000 --timeout 600 || true
 python agentmsg.py read <回信id>                    # 主路径：信箱收回执（结构化、省 token）
@@ -157,8 +160,8 @@ tern capture <id> --scrollback --ansi # 3) 换变体再试
 
 ```bash
 python agentmsg.py register <我的名字> --kind agent
-python agentmsg.py send <我的名字> <对方名> "请回复一条确认消息（agentmsg reply）证明信箱链路可用。"
-tern send <对方block> paste "有新消息：agentmsg read <通知里的id>，读完后用同脚本 agentmsg reply <id> \"已收到，确认。\""
+python agentmsg.py send <我的名字> <对方名> "任务：回一条确认消息证明信箱链路可用。完成后回信到本消息。"
+tern send <对方block> paste "有新消息：#<通知里的id>，请查收信箱，按信里说的做"
 tern send <对方block> keys enter
 tern wait <对方block> --until idle=3000 --timeout 120 || true
 python agentmsg.py inbox <我的名字>     # 看到 reply → 链路通
@@ -194,9 +197,9 @@ python agentmsg.py wait <我的名字> --after-id <我发的msg id> --thread <th
 # 先按 G2/G3 接入两个 agent（实测 omp + bypassPermissions 的 claude）；就绪确认：claude 用 capture 查审批框，omp 用 idle 门
 python agentmsg.py send <我> <agentA> "任务A…"     # 不带 --thread → 各自新线程，天然隔离
 python agentmsg.py send <我> <agentB> "任务B…"
-tern send <blockA> paste "有新消息：<脚本全路径> read <idA>，完成后 agentmsg reply <idA> \"…\""
+tern send <blockA> paste "有新消息：#<idA>，请查收信箱，按信里说的做"
 tern send <blockA> keys enter
-tern send <blockB> paste "有新消息：<脚本全路径> read <idB>，完成后 agentmsg reply <idB> \"…\""
+tern send <blockB> paste "有新消息：#<idB>，请查收信箱，按信里说的做"
 tern send <blockB> keys enter
 python agentmsg.py wait <我> --expect 2 --after-id <最后发出的msg id> --timeout 300   # 双回信齐了才返回
 ```
@@ -206,8 +209,8 @@ python agentmsg.py wait <我> --expect 2 --after-id <最后发出的msg id> --ti
 ```bash
 # ⚠ 实测：task new --assign 只插行不通知，必须配一条信箱消息把 agent 叫醒
 python agentmsg.py task new "任务描述" --assign <agent>
-python agentmsg.py send <我> <agent> "分派 task <id>：task list 查看；完成后 task set <id> done，并 reply 本消息结果"
-tern send <block> paste "有新消息：<脚本全路径> read <msgid>，按里面说的做。"
+python agentmsg.py send <我> <agent> "分派 task <id>（task list 可查）。完成后把 task 标记 done，并回信本消息一句话结果。"
+tern send <block> paste "有新消息：#<msgid>，请查收信箱，按信里说的做"
 tern send <block> keys enter
 python agentmsg.py wait <我> --after-id <msgid> --timeout 300
 python agentmsg.py task list        # state=done + 产物文件在，才算闭环

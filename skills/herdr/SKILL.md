@@ -96,6 +96,7 @@ python agentmsg.py watch tester --interval 5
 - `send / inbox / read / reply / done / wait`；
 - `thread_id` 和 `--after-id` 用于防止跨任务串信；
 - **单向通知（UDP 语义）**：`send` 发完即走即协议合法——不需要反馈就别建回执层。通知类用 `--kind notify` 标记，接收方 `read` 后不 `reply`，可 `done <id>` 清 pending；发送方不 `wait`、不查回执。详见方案 §5.4；
+- **派活话术与命名**：信箱正文用四要素自然话术（做什么 / 怎么交 / **谁消费后续** / 水位线），pane 通知只发 `有新消息：#<id>，请查收信箱`——脚本名与 CLI 不进话术。注册名用岗位代号（`dev-1`/`qa-1`，角色即标签），pane 位置与 harness 查 `agents` 注册表。详见方案 §5.6、§3；
 - `watch` 只承担通知，不代表执行或验收；
 - `agents` 中 `transport=herdr` 标识 Herdr 绑定；
 - `status`、`log`、`task` 是信箱辅助功能，不代替 ANWG Core 事实。
