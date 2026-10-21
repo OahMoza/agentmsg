@@ -29,6 +29,7 @@ herdr agent read <agent-name-or-pane-id> --source recent-unwrapped --lines 120
 
 Agent 状态：`idle`、`done`、`working`、`blocked`、`unknown`。
 - 投递目标**只有 idle/done** 才可通知；其他状态等待，不往审批/提问界面注入内容。
+- `herdr agent read`（读 pane 输出）= 排障工具不是监控：内容验证走信箱（`agentmsg read/inbox`），完成判定走 `agent get` 生命周期状态（结构化、零歧义）；只在超时/疑卡时读一眼屏，且投递安检靠 `agent get` 状态门、从不依赖读屏。机制与制度（tern/herdr 通用）见 `docs/observation-discipline.md`。
 - `herdr agent prompt` 已提供文本+Enter 的原子提交，不要重复手动发送 Enter。
 - `agent prompt` 成功只代表输入被提交，不代表 Agent 已处理。Agent 真正回执以 `agentmsg reply` 和消息 ID 为准。
 

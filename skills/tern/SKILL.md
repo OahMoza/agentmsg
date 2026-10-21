@@ -44,7 +44,7 @@ capture 后判定：
 
 规矩：
 
-- **每次 send 之前都先 capture**——把文本打进审批框就是事故，Tern 无自动拦截，这条纪律就是唯一的拦截。
+- **每次 send 之前都先做安全判定**——claude 类有审批框，用 capture 查词表；omp 无审批框，用 `tern wait --until idle` 静默门替代（见 omp 投递限制）。把文本打进审批框就是事故，Tern 无自动拦截，这条纪律就是唯一的拦截。
 - `wait --until idle=MS` 是输出静默判定，不是 agent 回合语义；MS 不低于 1500，宁可多等。
 - 超时 ≠ 没送达。先 capture 再决定，别盲发第二遍。
 - 需要按键（esc、ctrl+c）用 `tern send <id> keys esc`，逻辑键名。
@@ -60,6 +60,10 @@ tern process <id> --json           # 查这个块里跑的进程
 ```
 
 **注意**：capture 空 ≠ pane 死了。根因已定案（2026-10-16 交叉实验）：**tern 0.8.3 的 capture 丢 omp 的 TUI 帧，0.8.4 已修**——shown/hidden、交互/`--resume` 四种组合在 0.8.4 下全部可捕获；不可见的只有旧 daemon 升级前遗留 session 里的实例。遇到空 capture：判活用 `tern process <id> --json` 的 `foreground`，等回合用 `tern wait --until idle`（走输出流，与渲染无关），结果回收走信箱；先 `tern --version` 排除旧版本。备用屏本身（1049/同步更新）capture 是能看到的。
+
+**omp 渲染形态是第二个可见性开关**（2026-10-21，0.9.5 实测）：原生交互模式下帧不进文本模型（复现 0 字节、信箱收发正常），TUI 形态全可见——「0.8.4 已修」必要非充分。空屏排查：`tern --version` → 确认 omp 渲染形态 → `tern process` 判活 → `tern wait --until idle` 判完成 → 信箱回收。
+
+**capture 使用纪律**：读屏 = 排障工具，不是监控——整帧文本（含 omp 推理全程）灌进编排方上下文。内容验证走信箱、完成判定走 idle 门、判活走 `tern process`；capture 只在超时/疑卡/要看现场时用一眼；监控用 `tern events`。机制与制度（tern/herdr 通用）见 `docs/observation-discipline.md`。
 
 ## 监控
 
@@ -82,11 +86,11 @@ tern run <新block-id> "python agentmsg.py register <名字> --kind claude --blo
 
 任务正文里**永远不要写死 msg id**（发送时 id 还没定）；agent 按通知里的 id 自己取信（`python agentmsg.py read <通知里的id>`）。通知只包含消息 ID 和固定取信指引，不注入原消息正文。
 
-对 capture 不可见的 agent（如 omp）：**结果回收走信箱，不走 capture**——任务里要求它 `agentmsg reply <id> --file 产物路径`，完成后 `agentmsg wait/inbox` 收取；屏幕观察降级为 `tern process`（活没活）+ `tern wait --until idle`（干完没）。
+**结果回收走信箱，不走 capture**（即使 TUI 形态下 capture 可见——信箱是几行结构化记录，capture 是整帧推理文本，进的是编排方上下文）：任务里要求它 `agentmsg reply <id> --file 产物路径`，完成后 `agentmsg wait/inbox` 收取；capture 降级为按需排障工具（见「读输出」的 capture 使用纪律）。
 
 ### omp 投递限制（实测，勿踩）
 
-- **安检对 omp 天然弱**：capture 里 omp 干活时的 alt-screen 帧不可见（idle 提示符行有时可见），词表检查基本空转——omp 忙时防注入**靠静默门**（`tern wait --until idle`），不靠词表。
+- **安检对 omp 靠静默门，不靠词表**：omp 无审批框，没有标准审批文案可依赖；原生交互模式下帧干脆不可见、词表彻底空转，TUI 形态下帧里是推理文本同样无从判断——防注入一律以 `tern wait --until idle` 静默门为准，词表只作 claude 类的辅助。
 - **watch 对 omp 可能反复 skip**（idle 门未过就保持 pending）：这是设计行为，不是故障。要么等它空闲后重跑 `watch --once`，要么确认空闲后由编排方直接 `tern send <id> paste …` + `keys enter` 手投（omp 无审批框，直投风险低；仍须先 `wait --until idle` 确认不在干活）。
 - 别用 agentmsg 的 watch 投递给 omp 后看到 skip 就反复重跑——先 `tern wait --until idle` 再投，或改 cron/常驻 watch 让它自己等。
 
@@ -117,8 +121,8 @@ python agentmsg.py send <我的名字> <对方agent名> "任务正文，勿写�
 tern send <id> paste "有新消息：agentmsg read <通知里的id>，完成后 agentmsg reply <id> \"回复正文\""
 tern send <id> keys enter
 tern wait <id> --until idle=3000 --timeout 600 || true
-tern capture <id> --scrollback                     # 读结果
-python agentmsg.py read <回信id>                    # 或 inbox <我的名字> 收回执
+python agentmsg.py read <回信id>                    # 主路径：信箱收回执（结构化、省 token）
+tern capture <id> --scrollback                     # 仅怀疑卡住/要肉眼看现场时才看
 ```
 
 ### G2 接入一个现存的活 omp（不 split）
@@ -140,6 +144,7 @@ tern focus <宿主id>    # 焦点还给用户
 
 ```bash
 tern --version                        # 0.8.3 丢 omp 帧（0.8.4 已修）；旧 daemon 遗留 session 仍会空
+# 2026-10-21：omp 渲染形态是第二开关——原生交互模式（非 TUI）在 0.9.5 同样 0 字节，先确认 omp 是 TUI 形态
 tern process <id> --json              # 1) 活没活：foreground
 tern wait <id> --until idle=3000      # 2) 干完没：输出流判定，与渲染无关
 tern capture <id> --scrollback --ansi # 3) 换变体再试
@@ -184,7 +189,7 @@ python agentmsg.py wait <我的名字> --after-id <我发的msg id> --thread <th
 ### G9 多 agent 并行 fan-out（双发双收）
 
 ```bash
-# 先按 G2/G3 接入两个 agent（实测 omp + bypassPermissions 的 claude），各自 capture + idle 门确认就绪
+# 先按 G2/G3 接入两个 agent（实测 omp + bypassPermissions 的 claude）；就绪确认：claude 用 capture 查审批框，omp 用 idle 门
 python agentmsg.py send <我> <agentA> "任务A…"     # 不带 --thread → 各自新线程，天然隔离
 python agentmsg.py send <我> <agentB> "任务B…"
 tern send <blockA> paste "有新消息：<脚本全路径> read <idA>，完成后 agentmsg reply <idA> \"…\""

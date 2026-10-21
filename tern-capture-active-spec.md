@@ -90,3 +90,13 @@
 **2026-10-16 收窄**：同机发现**可完全捕获的 omp 实例**（Default session、`shown: true`、pwsh 内交互启动：idle 提示符、干活帧、备用屏内容全部可见）；0 字节实例全部位于 `shown: false` 的 session（经 `omp --resume` 启动）。「omp 帧不可见」收窄为两个候选：**隐藏 session/tab 不进 capture 合成路径**（首要嫌疑）或 **`--resume` 启动路径**。最小实验：同一 omp 二进制在 shown/hidden × resume/交互 交叉复测。
 
 **2026-10-16 定案（交叉实验完成，假设作废）**：四格矩阵在 `tern 0.8.4 (6b4535f)` 下全部可见——shown+交互 (10KB)、hidden+交互（`tern new session` 后台 session，1.3KB）、shown+`--resume`（复刻原 B 的启动命令与同一 jsonl，6.5KB 带历史回放）；唯一 0 字节的是 **0.8.3 daemon 遗留 session** 里的实例。shown/`--resume` 是混杂变量（跟着升级代次走），不是原因。根因：**0.8.3 的 capture 路径丢 omp 帧，0.8.4 已修**。§1–§7 的备用屏规格在 0.8.4 下已实测满足（omp 帧可读），本文件留作 0.8.3 回归参考。
+
+---
+
+## 9. 2026-10-21 增补：omp 渲染形态是第二个可见性开关；capture 使用纪律
+
+**新变量（tern 0.9.5 实测）**：同一 daemon 下，omp 以「原生交互模式」（非 TUI）运行时，capture 只见空闲 shell 提示符——omp 帧完全不进文本模型，0.8.3 症状在 0.9.5 复现；同一批 pane 恢复 TUI 形态后，capture 四变体全部可见（欢迎屏、对话、工具调用、推理全程），且信箱收发全程正常（可见性与功能解耦）。
+
+结论：§8 的「0.8.3 已修」是**必要非充分**——omp 侧渲染模式独立决定帧可见性。排查 capture 为空时，确认 tern 版本之外还要确认 omp 当前渲染形态。
+
+**capture 使用纪律**已泛化为编排器通用制度：信箱管内容、静默门管完成、读屏只排障、监控走事件流——机制与工具映射（tern/herdr 通用）见 `docs/observation-discipline.md`。

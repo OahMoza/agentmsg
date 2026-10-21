@@ -67,3 +67,14 @@ The interim "counterexample" hypothesis (hidden session / `--resume`) recorded e
 | hidden + `--resume` | original smoke-session omp ("B") | **0.8.3 daemon** | 0 bytes |
 
 Only the instance served by the **0.8.3 daemon** was invisible. `shown` state and `--resume` were confounds — they tracked which upgrade generation the session belonged to — not causes. The 0.8.3-era controlled experiments above (python `1049h`/`2026` writes visible under 0.8.3) remain valid: the 0.8.3 defect was specific to how omp's frames entered the text model, and this report's original findings describe it accurately. No omp-side change needed; close against tern 0.8.4.
+
+---
+
+## 2026-10-21 addendum (tern 0.9.5): omp rendering mode is a second visibility switch
+
+Same machine, tern 0.9.5 (2863c37). Two omp panes (`tern split … omp.exe`) while omp ran in its **native interactive (non-TUI) form** reproduced the headline symptom exactly: `tern capture` returned only the idle shell prompt line — omp frames absent from the text model — while omp itself worked (mailbox read → reply all succeeded). After omp was restored to its **TUI form**, `tern capture --ansi` on the same panes returned the full frame: welcome screen, conversation transcript, tool calls, and the agent's entire reasoning.
+
+Implications:
+
+1. The 2026-10-16 closure (root cause = tern 0.8.3, fixed in 0.8.4) is necessary but not sufficient: **omp's own rendering mode gates frame visibility independently of tern version**. A 0-byte capture on a current tern is not proof of a tern regression — check omp's rendering form first.
+2. Capture discipline: the TUI-mode frame includes the agent's full reasoning, so every capture ingests that text into the orchestrator's context. Capture is an exception-diagnosis tool (stuck/timeout), not a monitoring loop; content verification stays on the mailbox, completion on the output-silence gate. The generalized mechanism and tool mapping (tern/herdr) live in `docs/observation-discipline.md`.
