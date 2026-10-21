@@ -105,6 +105,8 @@ CREATE TABLE status_log(
 - 大内容（diff/日志）一律 `--file` 存附件，DB 只留路径，防 blob 膨胀；
 - `.agent-mail/` 加入 `.gitignore`（运行时状态，block id 每会话都变）。
 
+**命名约定（角色即标签，零代码）**：注册名直接用岗位代号——`dev-1`、`dev-2`、`qa-1`、`hrbp-1`。角色与程序类型正交：`name` 记岗位（收发地址、task `--assign`、话术寻址都用它），`kind` 只记 pane 里跑的程序（omp/claude…）；同一角色换程序 = 重注册换绑（state 重置，§10.3）。角色寻址仍走注册表（§5.6）：话术写 `dev-1`，pane 位置与 harness 查 `agents`。"按角色池派活"（派给任意空闲 qa）暂不做——常规化后再加 `--role` 过滤。
+
 ## 4. CLI 参考（`agentmsg.py`）
 
 ```bash
