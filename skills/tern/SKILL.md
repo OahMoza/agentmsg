@@ -86,6 +86,8 @@ tern run <新block-id> "python agentmsg.py register <名字> --kind claude --blo
 
 任务正文里**永远不要写死 msg id**（发送时 id 还没定）；agent 按通知里的 id 自己取信（`python agentmsg.py read <通知里的id>`）。通知只包含消息 ID 和固定取信指引，不注入原消息正文。
 
+**单向通知（UDP 语义）**：`send` 本身就是数据报——不需要反馈就别建回执层。`agentmsg send <我> <对方> "…" --kind notify` 发完即走：不 `wait`、不查回执，通知话术写明"读完即可，无需回复"。接收方 `read` 后不回信，可 `done <id>` 清 pending（唯一的可选 ACK）。广播 = 循环多次 `send`。协议语义详见方案 §5.4。
+
 **结果回收走信箱，不走 capture**（即使 TUI 形态下 capture 可见——信箱是几行结构化记录，capture 是整帧推理文本，进的是编排方上下文）：任务里要求它 `agentmsg reply <id> --file 产物路径`，完成后 `agentmsg wait/inbox` 收取；capture 降级为按需排障工具（见「读输出」的 capture 使用纪律）。
 
 ### omp 投递限制（实测，勿踩）

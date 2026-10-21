@@ -155,6 +155,21 @@ agentmsg wait human --expect 2 --kind reply --after-id 2 --timeout 600 --json
 
 `--after-id` 用单调递增的 msg id 而非时间戳：从 `send` 的输出直接拿，无时区问题。
 
+### 5.4 单向通知（UDP 语义：发完即走，不要回执）
+
+`send` 本身就是数据报：插库即返回（`ok: msg N`），协议**不强制 reply**。回执层（`wait`/`reply`/`thread`）是可选建筑；不需要反馈就不用它。
+
+```bash
+agentmsg send dev tester "部署完成，通知而已" --kind notify   # kind 自由字段，标 notify 与请求类区分
+# 投递照常（watch 或手投），通知话术声明"读完即可，无需回复"
+```
+
+纪律：
+- **发送方**：发完即走——不调 `wait`、不查 `inbox`；真要确认送达时才回头 `read <id>` 看 status（pending→read）。
+- **接收方**：通知类消息 `read` 后**不回信**；想让它从 pending 列表消失就补 `done <id>`（只翻状态、不产生消息）——这是唯一值得做的"ACK"。
+- **广播** = 循环 N 次 `send`（每收件人一封，天然隔离），不为它建 broadcast 命令。
+- 与真 UDP 的差别：**不丢包**——消息持久化到被 read 为止，是"必达但不用等"，不是 best-effort。
+
 ## 6. 可靠性：四层防线（死机/卡死怎么办）
 
 **设计原则：任何组件都可以死，真相只在 DB。状态判定 = 表里的事实 + 时间差，重启后真相互原。**

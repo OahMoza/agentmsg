@@ -95,6 +95,7 @@ python agentmsg.py watch tester --interval 5
 与 Tern 路径完全共享：
 - `send / inbox / read / reply / done / wait`；
 - `thread_id` 和 `--after-id` 用于防止跨任务串信；
+- **单向通知（UDP 语义）**：`send` 发完即走即协议合法——不需要反馈就别建回执层。通知类用 `--kind notify` 标记，接收方 `read` 后不 `reply`，可 `done <id>` 清 pending；发送方不 `wait`、不查回执。详见方案 §5.4；
 - `watch` 只承担通知，不代表执行或验收；
 - `agents` 中 `transport=herdr` 标识 Herdr 绑定；
 - `status`、`log`、`task` 是信箱辅助功能，不代替 ANWG Core 事实。
