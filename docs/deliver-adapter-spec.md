@@ -107,14 +107,14 @@ def deliver_one_<tool>(conn, name, target):
 
 ### 6.1 `<tool>_ready(target) -> bool`
 
-投递前安全门。语义：**目标当前处于"可以接受一段新输入"的状态**。
+投递前安全门（best-effort、fail-closed）。目标语义：**目标当前"可以接受一段新输入"**——用已验证状态近似，不构成安全或完成保证。
 
 | 要求 | 说明 |
 |---|---|
 | 优先结构化状态 | 用工具的 API/JSON（如 `herdr agent get`），不要靠终端文字猜。实在没有 API 才降级到文本启发式（如 Tern 的 `pane_unsafe` 审批框文案匹配） |
 | unknown 即不投 | 状态拿不到、解析不出、工具不可达 → 一律 `False`（fail-closed），宁可暂缓不误投 |
 | blocked 不投 | 审批/提问界面绝不注入；保留 pending 由人处理 |
-| ready 集合最小化 | 只认明确 ready 的状态（Herdr: `{idle, done}`；Tern 等价物：输出静默 ≥1.5s 且无审批特征） |
+| ready 集合最小化 | Herdr 仅接受 `{idle, done}`；Tern 使用输出静默 ≥1.5s 且无已知审批特征作为启发式。两者都不能保证目标在前台、审批已识别或任务已完成 |
 
 ### 6.2 `<tool>_submit(target, text) -> None`
 

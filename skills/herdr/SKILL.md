@@ -3,9 +3,9 @@ name: herdr
 description: "在 Herdr 中使用 agentmsg 项目信箱进行跨 Pane/Agent 的安全消息收发、等待与回执。仅在用户明确要求 Herdr 编排或 agentmsg 通信时使用，且需要 HERDR_ENV=1。"
 ---
 
-# Herdr + agentmsg 项目信箱（Windows / Herdr 0.9.4）
+# Herdr + agentmsg 项目信箱（Windows / Herdr 0.9.4–0.9.5）
 
-该 Skill 补充 [Herdr 官方 Skill](https://github.com/herdrdev/herdr/blob/v0.9.4/skills/herdr/SKILL.md) 的使用方法，将 `agentmsg.py` 的项目级可靠信箱集成到 Herdr。**官方 Herdr CLI 仍是权威；本 Skill 不取代 `herdr --skill` 的实时说明。**
+该 Skill 补充 [Herdr 官方 Skill](https://github.com/herdrdev/herdr/blob/v0.9.5/skills/herdr/SKILL.md) 的使用方法，将 `agentmsg.py` 的项目级可靠信箱集成到 Herdr。**官方 Herdr CLI 仍是权威；本 Skill 不取代 `herdr --skill` 的实时说明。** 0.9.5 是 0.9.4 的修复版，真实 Windows 端到端兼容性须以隔离验证为准。
 
 ## 0. 安全与范围
 
@@ -29,7 +29,7 @@ herdr agent read <agent-name-or-pane-id> --source recent-unwrapped --lines 120
 
 Agent 状态：`idle`、`done`、`working`、`blocked`、`unknown`。
 - 投递目标**只有 idle/done** 才可通知；其他状态等待，不往审批/提问界面注入内容。
-- `herdr agent read`（读 pane 输出）= 排障工具不是监控：内容验证走信箱（`agentmsg read/inbox`），完成判定走 `agent get` 生命周期状态（结构化、零歧义）；只在超时/疑卡时读一眼屏，且投递安检靠 `agent get` 状态门、从不依赖读屏。机制与制度（tern/herdr 通用）见 `docs/observation-discipline.md`。
+- `herdr agent read` 是排障工具，不是监控；内容和任务结果以信箱回执为准。`agent get` 是结构化识别结果，并非零歧义：`idle/done` 不保证未知审批界面已识别、Agent 处于前台或后台任务结束，状态查询与提交之间也可能变化。机制见 `docs/observation-discipline.md`。
 - `herdr agent prompt` 已提供文本+Enter 的原子提交，不要重复手动发送 Enter。
 - `agent prompt` 成功只代表输入被提交，不代表 Agent 已处理。Agent 真正回执以 `agentmsg reply` 和消息 ID 为准。
 
@@ -110,4 +110,4 @@ python agentmsg.py watch tester --interval 5
 - 执行环境升级后先查看 `herdr --skill` 和 `herdr api schema --json`，再核对适配器；未知能力必须安全降级。
 - 测试时先用 `python -m unittest test_agentmsg -v` + `python -m unittest test_agentmsg_herdr -v`，之后在用户许可的临时 Herdr Pane 做真实回环。不要在真实项目中盲目发送破坏性测试内容。
 
-参考：[Herdr v0.9.4 官方 Skill](https://github.com/herdrdev/herdr/blob/v0.9.4/skills/herdr/SKILL.md) · [Herdr Agent 自动化](https://herdr.dev/docs/agent-automation/)。
+参考：[Herdr v0.9.5 发布说明](https://github.com/herdrdev/herdr/releases/tag/v0.9.5) · [Herdr 官方 Skill](https://github.com/herdrdev/herdr/blob/v0.9.5/skills/herdr/SKILL.md) · [Herdr Agent 自动化](https://herdr.dev/docs/agent-automation/)。

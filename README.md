@@ -68,7 +68,7 @@ npx skills add OahMoza/agentmsg -g -y  # 装到用户级，免确认
 
 ## Herdr 适配（可与 Tern 共存）
 
-`skills/herdr/SKILL.md` 是面向 **Herdr 0.9.4** 的 agentmsg 扩展 Skill；对应的 transport 在 `agentmsg_herdr.py`。消息 DB/Claim/Thread/Wait 仍由 `agentmsg.py` 统一维护，不重建队列。
+`skills/herdr/SKILL.md` 是面向 **Herdr 0.9.4–0.9.5** 的 agentmsg 扩展 Skill；对应的 transport 在 `agentmsg_herdr.py`。消息 DB/Claim/Thread/Wait 仍由 `agentmsg.py` 统一维护，不重建队列。0.9.5 是 [0.9.4 的修复版](https://github.com/herdrdev/herdr/releases/tag/v0.9.5)：Codex 状态改回屏幕识别，命名会话中 Claude Code 提问界面现会被识别为 `blocked`。客户端和服务端版本可能不同。
 
 在 **Herdr 托管的 Agent Pane**（`HERDR_ENV=1`）内操作：
 
@@ -83,6 +83,10 @@ python agentmsg.py inbox controller --all
 ```
 
 Herdr 路径只向 `idle/done` Agent 投递固定消息通知（`herdr agent get` + `herdr agent prompt`）；`working/blocked/unknown` 不投递。Herdr 成功返回意味着输入已被提交，**不是 Agent 已读取/完成**。可由 Agent `agentmsg read <id>` 后 `agentmsg reply <id> ...`，用 `wait` 按消息 ID/thread 栅栏收回执。未做真实 Herdr/Windows 端到端验证前，请先按 Skill 说明运行隔离冒烟测试。
+
+Herdr 的 `idle/done` 是识别结果，不能保证识别所有审批界面、Agent 在前台或后台任务已完成。Tern 的输出静默和 `working=false` 同样不能证明空闲或安全；具体完成结果应以信箱回执为准。
+
+Tern 忙碌信号来自 `tern inspect --json`（隔离实验，2026-10-30）：客户端 `0.9.8 (f21d9a3)`，受测 omp `18.14.0`；daemon 版本未取得。omp 任务期间观察到 `working=true`，回答后为 `false`；PowerShell 执行 30 秒等待任务、完成标记尚未出现（忙而静默）时观察到 `working=false`。尚未覆盖其他 Agent、审批/提问、其他渲染形态及 daemon 一致性；`working` 字段的内部来源也未查明，0.9.5–0.9.8 的逐版发布记录未取得。按当前证据，watcher 不把 `working` 接入投递判断。
 
 旧 `register --block <int>` 和 Tern watcher 默认行为保持兼容；用 `--herdr-target <agent-name-or-pane-id>` 给同一收件人切换至 Herdr，随时再用 `--block` 切回。
 

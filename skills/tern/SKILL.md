@@ -44,7 +44,7 @@ capture 后判定：
 
 规矩：
 
-- **每次 send 之前都先做安全判定**——claude 类有审批框，用 capture 查词表；omp 无审批框，用 `tern wait --until idle` 静默门替代（见 omp 投递限制）。把文本打进审批框就是事故，Tern 无自动拦截，这条纪律就是唯一的拦截。
+- **每次 send 之前过最小安检门**：先 `tern wait --until idle=MS` 过静默门，再 `tern capture` 检查已知审批文案；命中则暂停并交由用户处理。静默门和词表都是启发式，可能漏掉静默工作或未知审批，不能证明投递安全。
 - `wait --until idle=MS` 是输出静默判定，不是 agent 回合语义；MS 不低于 1500，宁可多等。
 - 超时 ≠ 没送达。先 capture 再决定，别盲发第二遍。
 - 需要按键（esc、ctrl+c）用 `tern send <id> keys esc`，逻辑键名。
@@ -59,11 +59,11 @@ tern capture <id> --ansi           # 颜色/样式本身是证据时
 tern process <id> --json           # 查这个块里跑的进程
 ```
 
-**注意**：capture 空 ≠ pane 死了。根因已定案（2026-10-16 交叉实验）：**tern 0.8.3 的 capture 丢 omp 的 TUI 帧，0.8.4 已修**——shown/hidden、交互/`--resume` 四种组合在 0.8.4 下全部可捕获；不可见的只有旧 daemon 升级前遗留 session 里的实例。遇到空 capture：判活用 `tern process <id> --json` 的 `foreground`，等回合用 `tern wait --until idle`（走输出流，与渲染无关），结果回收走信箱；先 `tern --version` 排除旧版本。备用屏本身（1049/同步更新）capture 是能看到的。
+**注意**：capture 空 ≠ pane 死了。2026-10-16 的交叉实验显示 tern 0.8.3 丢失部分 omp 帧，0.8.4 修复了所测场景；旧 daemon 遗留 session 仍可能为空。排查时检查版本与 `tern process <id> --json` 的 `foreground`；静默门只反映输出静默，接入信箱的任务结果走信箱。
 
-**omp 渲染形态是第二个可见性开关**（2026-10-21，0.9.5 实测）：原生交互模式下帧不进文本模型（复现 0 字节、信箱收发正常），TUI 形态全可见——「0.8.4 已修」必要非充分。空屏排查：`tern --version` → 确认 omp 渲染形态 → `tern process` 判活 → `tern wait --until idle` 判完成 → 信箱回收。
+**omp 渲染形态也是可见性变量**（2026-10-21，tern 0.9.5 实测）：原生交互形态下帧不可见，TUI 形态可见。空屏时检查版本、渲染形态和进程，不据此判断任务完成或盲发第二遍。
 
-**capture 使用纪律**：读屏 = 排障工具，不是监控——整帧文本（含 omp 推理全程）灌进编排方上下文。内容验证走信箱、完成判定走 idle 门、判活走 `tern process`；capture 只在超时/疑卡/要看现场时用一眼；监控用 `tern events`。机制与制度（tern/herdr 通用）见 `docs/observation-discipline.md`。
+**capture 使用纪律**：读屏用于超时、疑似卡住或检查审批；接入 agentmsg 的任务，内容与完成回执走信箱，判活走 `tern process`，监控使用 `tern events`。未接信箱的直接任务按需 capture 读结果。静默不证明 Agent 空闲。机制见 `docs/observation-discipline.md`。
 
 ## 监控
 
@@ -95,9 +95,8 @@ tern run <新block-id> "python agentmsg.py register <名字> --kind claude --blo
 
 ### omp 投递限制（实测，勿踩）
 
-- **安检对 omp 靠静默门，不靠词表**：omp 无审批框，没有标准审批文案可依赖；原生交互模式下帧干脆不可见、词表彻底空转，TUI 形态下帧里是推理文本同样无从判断——防注入一律以 `tern wait --until idle` 静默门为准，词表只作 claude 类的辅助。
-- **watch 对 omp 可能反复 skip**（idle 门未过就保持 pending）：这是设计行为，不是故障。要么等它空闲后重跑 `watch --once`，要么确认空闲后由编排方直接 `tern send <id> paste …` + `keys enter` 手投（omp 无审批框，直投风险低；仍须先 `wait --until idle` 确认不在干活）。
-- 别用 agentmsg 的 watch 投递给 omp 后看到 skip 就反复重跑——先 `tern wait --until idle` 再投，或改 cron/常驻 watch 让它自己等。
+- **omp 静默门的边界**：输出静默不能证明 Agent 不在工作；屏幕可能不可读，审批文案检查也可能漏报。最小门不等于安全证明。
+- **watch 可能反复 skip**：静默门未通过时消息保持 pending，等待状态变化后重跑。手动投递同样先过最小门：`tern wait --until idle` + capture 查已知审批文案；这仍是启发式，有不确定的界面就上报用户，不代按。
 
 ## 收尾
 
@@ -118,7 +117,7 @@ tern run <新block-id> "python agentmsg.py register <名字> --kind claude --blo
 ```bash
 tern ls --json                                     # 找目标 block id（只认 JSON 里的 id）
 tern process <id> --json                           # foreground=omp.exe → 活着
-tern capture <id>                                  # 安检：idle ❯ 可投；审批框 → 上报用户
+tern capture <id>                                  # 排障/检查已知审批文案；提示符本身不证明可投
 tern wait <id> --until idle=3000 --timeout 120 || true
 python agentmsg.py agents                          # 确认对方已注册；顺带看自己的发件人名在不在
 python agentmsg.py register <我的名字> --kind agent  # 不在就注册，否则对方 reply 被拒
@@ -148,13 +147,15 @@ tern focus <宿主id>    # 焦点还给用户
 ### G4 capture 为空的排查序列
 
 ```bash
-tern --version                        # 0.8.3 丢 omp 帧（0.8.4 已修）；旧 daemon 遗留 session 仍会空
-# 2026-10-21：omp 渲染形态是第二开关——原生交互模式（非 TUI）在 0.9.5 同样 0 字节，先确认 omp 是 TUI 形态
+tern --version                        # 0.8.3 曾丢 omp 帧（0.8.4 修复所测场景）；旧 daemon 遗留 session 仍会空
+# omp 渲染形态是可见性变量：原生交互模式可能 0 字节；先确认 omp 形态与 tern 版本
 tern process <id> --json              # 1) 活没活：foreground
-tern wait <id> --until idle=3000      # 2) 干完没：输出流判定，与渲染无关
+tern wait <id> --until idle=3000      # 2) 输出是否静默；静默不证明干完，仅作为停止等待的参考
 tern capture <id> --scrollback --ansi # 3) 换变体再试
-# 仍空 → 走 G1 的信箱回收路径，别盲发第二遍
+# 仍空 → 接了信箱的任务走信箱回收；未接信箱的按需读输出/人工确认，别盲发第二遍
 ```
+
+完成判定以任务自身证据为准：接入信箱的看回执，直接任务按需读输出后由人判断；静默只说明没有输出。
 
 ### G5 验证信箱链路是否通（最小回环）
 
@@ -194,7 +195,7 @@ python agentmsg.py wait <我的名字> --after-id <我发的msg id> --thread <th
 ### G9 多 agent 并行 fan-out（双发双收）
 
 ```bash
-# 先按 G2/G3 接入两个 agent（实测 omp + bypassPermissions 的 claude）；就绪确认：claude 用 capture 查审批框，omp 用 idle 门
+# 先按 G2/G3 接入两个 agent；确认各自准备接收输入，静默和审批词表均非安全保证
 python agentmsg.py send <我> <agentA> "任务A…"     # 不带 --thread → 各自新线程，天然隔离
 python agentmsg.py send <我> <agentB> "任务B…"
 tern send <blockA> paste "有新消息：#<idA>，请查收信箱，按信里说的做"
