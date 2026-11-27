@@ -294,6 +294,20 @@ class TestTernSafety(Base):
         self.assertEqual(self.sql("SELECT status FROM messages WHERE id=1")[0]["status"], "pending")
         self.assertIn("未静默", err)
 
+    def test_quiet_gate_timeout_is_generous(self):
+        """静默门窗口不能太短：3s 内凑不满 idle=1500 的连续静默时，刚活跃过的
+        pane 会被误判为忙 → 消息长期 skip 滞留 pending（实测复现）。"""
+        self.call("init")
+        self.reg("tester", block=111)
+        self.send("dev", "tester", "任务A")
+        fake = FakeTern()  # wait 正常返回（pane 静默）
+        with mock.patch.object(am.subprocess, "run", fake):
+            self.call("watch", "tester", "--once")
+        waits = [c for c in fake.calls if c[1] == "wait"]
+        self.assertTrue(waits)
+        timeout = int(waits[0][waits[0].index("--timeout") + 1])
+        self.assertGreaterEqual(timeout, 10)
+
     def test_wrong_pane_reverts_to_pending(self):
         self.call("init")
         self.reg("tester", block=999)  # 已关闭的 pane
