@@ -37,6 +37,53 @@ python agentmsg.py watch tester --once   # 投完当前 pending 即退出，适�
 | `sweep` | 清理过期附件/租约 |
 | `watch <me>` | 常驻投递循环（Tern pane 投递，失败自动回退 pending） |
 
+## 投递流程（时序图）
+
+一条消息从发出到收回执的完整链路，含 watcher 的投递决策与状态流转：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant M as 主控 controller
+    participant DB as 信箱 mail.db
+    participant W as watcher 进程
+    participant T as Tern pane
+    participant G as Agent（omp/claude/grok…）
+
+    rect rgb(240,244,248)
+    Note over M,DB: 准备（每个项目一次）
+    M->>DB: init 建库
+    M->>DB: register 参与者名 --block paneId
+    end
+
+    M->>DB: send 发件人 收件人 "任务正文"
+    DB-->>M: ok msg N（status=pending）
+
+    loop 每 5s（或 cron --once）
+        W->>DB: claim_one：pending → claimed（租约+token）
+        W->>T: tern wait 静默门 idle=1500
+        alt pane 忙 或 命中审批词表
+            W->>DB: revert → pending（skip，等下一轮）
+        else 可投递
+            W->>T: tern send paste "[agentmsg] 新消息 msg N"
+            W->>T: tern send keys enter
+            W->>DB: finalize：claimed → delivered
+        end
+    end
+
+    G->>T: 在 pane 内看到通知
+    G->>DB: python agentmsg.py read N（→ read）
+    G->>G: 执行任务（工具调用）
+    G->>DB: reply N "结果"（→ done）
+
+    M->>DB: wait 我 --after-id N（阻塞收执）
+    DB-->>M: 收到回信
+    M->>DB: inbox / read 取正文与产物
+```
+
+状态机一览：`pending → claimed → delivered → read → done`。
+异常路径统一回退：未静默、审批框、pane 已死、进程崩溃（超租约）都回到 `pending` 重投，靠 `claim_token` 做 fencing 防重复投递。
+
 ## 可靠性设计（v2.1）
 
 - **原子认领 + 租约**：watcher 认领消息带 2 分钟租约与 `claim_token`，多 watcher 并发不重复投递。
