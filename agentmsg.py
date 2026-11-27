@@ -16,6 +16,9 @@ STALE_MINUTES = 15  # ponytail: 状态租约固定 15 分钟；要可调再加 -
 CLAIM_LEASE_MINUTES = 2  # ponytail: 认领租约 2 分钟（paste 最多 ~30s），只兜崩溃，够用
 WATCH_LOCK_MINUTES = 10  # ponytail: watcher 锁残留阈值，超时可接管
 IDLE_GATE_MS = 1500  # ponytail: 投递前输出静默门（tern skill 纪律：不低于 1500，宁可多等）
+# 静默门的等待窗口。3s 太短：pane 刚结束一轮（标题生成/后台请求/输出衰减）时，
+# 3s 内常凑不满连续 1.5s 静默 → 被判「疑似忙」而 skip，消息长期滞留 pending。
+WAIT_QUIET_TIMEOUT_S = 10
 TERN = os.environ.get("AGENTMSG_TERN", "tern")  # 测试钩子：可指向 stub
 APPROVAL_MARKERS = (  # 启发式安检清单（tern skill 的 capture 判定纪律）；漏报不保证，宁跳过
     "do you want", "allow", "approve", "(y/n)", "[y/n]",
@@ -300,11 +303,13 @@ def deliver_one(conn, name):
         # 静默门：输出未静默（agent 在干活）→ 不注入。对主屏/备用屏 TUI 都生效
         # （判定走 PTY 输出流，不依赖画面），补 capture 对 alt-screen 失明的洞
         wr = subprocess.run([TERN, "wait", str(ag["tern_block_id"]),
-                             "--until", f"idle={IDLE_GATE_MS}", "--timeout", "3"],
-                            capture_output=True, text=True, timeout=10)
+                             "--until", f"idle={IDLE_GATE_MS}",
+                             "--timeout", str(WAIT_QUIET_TIMEOUT_S)],
+                            capture_output=True, text=True,
+                            timeout=WAIT_QUIET_TIMEOUT_S + 5)
         if wr.returncode != 0:
             revert(conn, row["id"], row["claim_token"])
-            print(f"skip: msg {row['id']} 暂缓——pane 输出未静默（疑似忙），保持 pending", file=sys.stderr)
+            print(f"skip: msg {row['id']} 暂缓——pane 输出未静默（疑似忙，wait_exit={wr.returncode}），保持 pending", file=sys.stderr)
             return "skipped"
         if pane_unsafe(capture(ag["tern_block_id"])):  # B：先安检再打字（审批框文案）
             revert(conn, row["id"], row["claim_token"])
